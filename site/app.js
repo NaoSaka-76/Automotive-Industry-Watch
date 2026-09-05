@@ -74,6 +74,9 @@
 
     var body = el("div", "item__body");
     body.appendChild(el("span", "item__title", item.title || "(タイトル不明)"));
+    if (item.title_ja) {
+      body.appendChild(el("span", "item__title-ja", item.title_ja));
+    }
 
     var meta = el("div", "item__meta");
     if (recent) meta.appendChild(el("span", "new-badge", "24時間以内"));
@@ -281,20 +284,20 @@
     var latest = earnings.latest;
     card.appendChild(el(
       "div", "earnings-card__period",
-      latest.period_label + "(3ヶ月)" + (latest.announced ? " ・発表日 " + latest.announced : "")
+      (latest.release_title || latest.period_label) + (latest.announced ? " ・発表日 " + latest.announced : "")
     ));
 
     var rows = [
-      { key: "revenue", label: "売上高" },
+      { key: "revenue", label: "営業収益" },
       { key: "operating_income", label: "営業利益" },
-      { key: "ordinary_income", label: "経常利益" },
-      { key: "net_income", label: "最終利益(純利益)" },
+      { key: "income_before_tax", label: "税引前利益" },
+      { key: "net_income", label: "親会社帰属 四半期利益" },
     ];
 
     var grid = el("div", "earnings-card__grid");
     rows.forEach(function (r) {
       var value = latest[r.key];
-      var yoy = latest.yoy ? latest.yoy[r.key] : undefined;
+      var yoy = latest[r.key + "_yoy"];
       var cell = el("div", "earnings-card__cell");
       cell.appendChild(el("div", "earnings-card__cell-label", r.label));
       cell.appendChild(el("div", "earnings-card__cell-value", formatMillionYen(value)));
@@ -316,13 +319,21 @@
 
     var note = el("p", "panel__note earnings-card__note");
     note.appendChild(document.createTextNode(
-      "出典: " + (earnings.source_label || "kabutan.jp") + "(非公式の第三者集計)。正式な数値はトヨタ自動車の決算短信をご確認ください。 "
+      "出典: " + (earnings.source_label || "トヨタ自動車 投資家情報") + "(IFRS連結決算短信より)。 "
     ));
-    var link = el("a", null, "出典を見る ↗");
+    var link = el("a", null, "決算報告ページ ↗");
     link.href = earnings.source_url;
     link.target = "_blank";
     link.rel = "noopener noreferrer";
     note.appendChild(link);
+    if (latest.pdf_url) {
+      note.appendChild(document.createTextNode(" "));
+      var pdfLink = el("a", null, "決算要旨PDF ↗");
+      pdfLink.href = latest.pdf_url;
+      pdfLink.target = "_blank";
+      pdfLink.rel = "noopener noreferrer";
+      note.appendChild(pdfLink);
+    }
     card.appendChild(note);
 
     return card;
@@ -350,8 +361,13 @@
       renderInto(listWrap, filterByCategory(section[activeSort], activeCategory));
     }
 
-    var categoryLabels = ["すべて"].concat(CATEGORY_ORDER.map(function (c) { return CATEGORY_LABEL[c]; }));
-    var categoryKeys = ["all"].concat(CATEGORY_ORDER);
+    // 実際にトピックス内に存在するカテゴリーのみをタブ化する
+    // (押しても該当ゼロ件になるタブを作らないため)。
+    var presentCategories = CATEGORY_ORDER.filter(function (c) {
+      return (section.newest || []).some(function (item) { return item.category === c; });
+    });
+    var categoryLabels = ["すべて"].concat(presentCategories.map(function (c) { return CATEGORY_LABEL[c]; }));
+    var categoryKeys = ["all"].concat(presentCategories);
     panel.appendChild(makeTabGroup(categoryLabels, 0, function (idx) {
       activeCategory = categoryKeys[idx];
       render();

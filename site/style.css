@@ -474,6 +474,13 @@ a { color: inherit; }
   word-break: break-word;
 }
 
+.item__title-ja {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-muted);
+  word-break: break-word;
+}
+
 .item__meta {
   display: flex;
   flex-wrap: wrap;
