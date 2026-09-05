@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+.venv/
+site/data/latest.json
+.DS_Store
