@@ -144,23 +144,21 @@
     var rows = [];
 
     if (sections.toyota_news) {
-      rows.push({ label: "① トヨタ自動車 最新トピックス", count: countRecent(sections.toyota_news.newest), anchor: "section-toyota" });
+      rows.push({ label: "① トヨタ自動車トピックス", count: countRecent(sections.toyota_news.newest), anchor: "section-toyota" });
     }
     if (sections.industry_news && sections.industry_news.regions) {
       var regions = sections.industry_news.regions;
-      REGION_ORDER.forEach(function (key) {
-        var r = regions[key];
-        if (!r) return;
-        rows.push({ label: "② " + (r.flag || "") + " " + r.label, count: countRecent(r.newest), anchor: "section-industry" });
-      });
+      var industryCount = REGION_ORDER.reduce(function (sum, key) {
+        return sum + (regions[key] ? countRecent(regions[key].newest) : 0);
+      }, 0);
+      rows.push({ label: "② 自動車産業に関するトピックス", count: industryCount, anchor: "section-industry" });
     }
     if (sections.motorsports && sections.motorsports.categories) {
       var cats = sections.motorsports.categories;
-      MOTORSPORTS_ORDER.forEach(function (key) {
-        var c = cats[key];
-        if (!c) return;
-        rows.push({ label: "③ " + c.label, count: countRecent(c.newest), anchor: "section-motorsports" });
-      });
+      var motorsportsCount = MOTORSPORTS_ORDER.reduce(function (sum, key) {
+        return sum + (cats[key] ? countRecent(cats[key].newest) : 0);
+      }, 0);
+      rows.push({ label: "③ モータースポーツ", count: motorsportsCount, anchor: "section-motorsports" });
     }
 
     var totalCount = rows.reduce(function (sum, r) { return sum + r.count; }, 0);
