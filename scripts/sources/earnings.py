@@ -44,7 +44,13 @@ def _parse_number(text: str) -> float | None:
 
 def fetch() -> dict:
     try:
-        resp = requests.get(URL, headers={"User-Agent": _BROWSER_USER_AGENT}, timeout=REQUEST_TIMEOUT)
+        headers = {
+            "User-Agent": _BROWSER_USER_AGENT,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+            "Referer": "https://kabutan.jp/",
+        }
+        resp = requests.get(URL, headers=headers, timeout=REQUEST_TIMEOUT)
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
         table = soup.select_one(".fin_quarter_result_d table")
