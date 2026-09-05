@@ -184,20 +184,181 @@
     return panel;
   }
 
+  // ---- ① トヨタ自動車: 株価チャート ------------------------------------------
+
+  var SVG_NS = "http://www.w3.org/2000/svg";
+
+  function svgEl(tag, attrs) {
+    var node = document.createElementNS(SVG_NS, tag);
+    Object.keys(attrs || {}).forEach(function (k) { node.setAttribute(k, attrs[k]); });
+    return node;
+  }
+
+  function formatYen0(n) {
+    return "¥" + Math.round(n).toLocaleString("ja-JP");
+  }
+
+  function buildStockChart(stock) {
+    var card = el("div", "stock-card");
+    card.appendChild(el("div", "stock-card__title", "トヨタ自動車 株価 (7203.T)"));
+
+    if (!stock || stock.error || !stock.history || stock.history.length === 0) {
+      card.appendChild(el("p", "panel__empty", "株価データを取得できませんでした。"));
+      return card;
+    }
+
+    var up = (stock.change || 0) >= 0;
+    var sign = up ? "+" : "";
+
+    var priceRow = el("div", "stock-card__price-row");
+    priceRow.appendChild(el("span", "stock-card__price", formatYen0(stock.price)));
+    priceRow.appendChild(el(
+      "span",
+      "stock-card__change " + (up ? "stock-card__change--up" : "stock-card__change--down"),
+      sign + stock.change.toFixed(1) + " (" + sign + stock.change_percent.toFixed(2) + "%)"
+    ));
+    card.appendChild(priceRow);
+
+    var history = stock.history;
+    var closes = history.map(function (h) { return h.close; });
+    var min = Math.min.apply(null, closes);
+    var max = Math.max.apply(null, closes);
+    var range = max - min || 1;
+    var W = 600, H = 160, padX = 4, padY = 10;
+
+    var points = history.map(function (h, i) {
+      var x = padX + (i / Math.max(1, history.length - 1)) * (W - padX * 2);
+      var y = padY + (1 - (h.close - min) / range) * (H - padY * 2);
+      return x.toFixed(1) + "," + y.toFixed(1);
+    });
+
+    var svg = svgEl("svg", { viewBox: "0 0 " + W + " " + H, class: "stock-card__chart", preserveAspectRatio: "none" });
+    var areaPoints = points.concat([(W - padX) + "," + (H - padY), padX + "," + (H - padY)]).join(" ");
+    var area = svgEl("polygon", { points: areaPoints });
+    area.style.fill = up ? "rgba(255,90,90,0.14)" : "rgba(63,208,208,0.14)";
+    svg.appendChild(area);
+
+    var line = svgEl("polyline", {
+      points: points.join(" "), fill: "none", "stroke-width": "2",
+      "stroke-linejoin": "round", "stroke-linecap": "round",
+    });
+    line.style.stroke = up ? "var(--critical)" : "var(--cat-new_tech)";
+    svg.appendChild(line);
+
+    card.appendChild(svg);
+
+    var rangeRow = el("div", "stock-card__range");
+    rangeRow.appendChild(el("span", null, "直近3ヶ月 安値 " + formatYen0(min)));
+    rangeRow.appendChild(el("span", null, "高値 " + formatYen0(max)));
+    card.appendChild(rangeRow);
+
+    card.appendChild(el(
+      "p", "panel__note stock-card__note",
+      "終値ベース・日次(" + history[history.length - 1].date + "時点)。データ提供: Yahoo Finance(非公式・無認証エンドポイント)。"
+    ));
+
+    return card;
+  }
+
+  // ---- ① トヨタ自動車: 最新決算ダイジェスト ----------------------------------
+
+  function formatMillionYen(millions) {
+    if (millions == null) return "—";
+    var trillion = millions / 1000000;
+    if (Math.abs(trillion) >= 0.1) return trillion.toFixed(2) + "兆円";
+    return Math.round(millions).toLocaleString("ja-JP") + "百万円";
+  }
+
+  function buildEarningsCard(earnings) {
+    var card = el("div", "earnings-card");
+    card.appendChild(el("div", "earnings-card__title", "最新決算ダイジェスト"));
+
+    if (!earnings || earnings.error || !earnings.latest) {
+      card.appendChild(el("p", "panel__empty", "決算データを取得できませんでした。"));
+      return card;
+    }
+
+    var latest = earnings.latest;
+    card.appendChild(el(
+      "div", "earnings-card__period",
+      latest.period_label + "(3ヶ月)" + (latest.announced ? " ・発表日 " + latest.announced : "")
+    ));
+
+    var rows = [
+      { key: "revenue", label: "売上高" },
+      { key: "operating_income", label: "営業利益" },
+      { key: "ordinary_income", label: "経常利益" },
+      { key: "net_income", label: "最終利益(純利益)" },
+    ];
+
+    var grid = el("div", "earnings-card__grid");
+    rows.forEach(function (r) {
+      var value = latest[r.key];
+      var yoy = latest.yoy ? latest.yoy[r.key] : undefined;
+      var cell = el("div", "earnings-card__cell");
+      cell.appendChild(el("div", "earnings-card__cell-label", r.label));
+      cell.appendChild(el("div", "earnings-card__cell-value", formatMillionYen(value)));
+      if (yoy !== undefined && yoy !== null) {
+        var yoyUp = yoy >= 0;
+        cell.appendChild(el(
+          "div", "earnings-card__yoy " + (yoyUp ? "earnings-card__yoy--up" : "earnings-card__yoy--down"),
+          "前年同期比 " + (yoyUp ? "+" : "") + yoy.toFixed(1) + "%"
+        ));
+      }
+      grid.appendChild(cell);
+    });
+    card.appendChild(grid);
+
+    var extra = el("div", "earnings-card__extra");
+    if (latest.eps != null) extra.appendChild(el("span", null, "EPS " + latest.eps + "円"));
+    if (latest.operating_margin != null) extra.appendChild(el("span", null, "営業利益率 " + latest.operating_margin + "%"));
+    if (extra.children.length > 0) card.appendChild(extra);
+
+    var note = el("p", "panel__note earnings-card__note");
+    note.appendChild(document.createTextNode(
+      "出典: " + (earnings.source_label || "kabutan.jp") + "(非公式の第三者集計)。正式な数値はトヨタ自動車の決算短信をご確認ください。 "
+    ));
+    var link = el("a", null, "出典を見る ↗");
+    link.href = earnings.source_url;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    note.appendChild(link);
+    card.appendChild(note);
+
+    return card;
+  }
+
   // ---- ① トヨタ自動車 最新トピックス ---------------------------------------
 
-  function buildToyotaPanel(section) {
+  function buildToyotaPanel(section, stockData, earningsData) {
     var panel = el("section", "panel panel--full");
     panel.id = "section-toyota";
     panel.appendChild(buildPanelHeader("car", "① トヨタ自動車 最新トピックス", (section.newest || []).length));
-    panel.appendChild(el("p", "panel__note", "トヨタ自動車に関するニュースをGoogleニュース検索から日英で集約しています。"));
 
-    var listWrap = el("div");
-    var sort = "newest";
-    function render() { renderInto(listWrap, section[sort]); }
+    var topRow = el("div", "toyota-top-row");
+    topRow.appendChild(buildStockChart(stockData));
+    topRow.appendChild(buildEarningsCard(earningsData));
+    panel.appendChild(topRow);
+
+    panel.appendChild(el("p", "panel__note", "トヨタ自動車に関するニュースをGoogleニュース検索から日英で集約し、見出しのキーワードから新製品・新技術・規制・経営・政策・他へ自動分類しています(参考値)。"));
+
+    var listWrap = el("div", "list-scroll");
+    var activeCategory = "all";
+    var activeSort = "newest";
+
+    function render() {
+      renderInto(listWrap, filterByCategory(section[activeSort], activeCategory));
+    }
+
+    var categoryLabels = ["すべて"].concat(CATEGORY_ORDER.map(function (c) { return CATEGORY_LABEL[c]; }));
+    var categoryKeys = ["all"].concat(CATEGORY_ORDER);
+    panel.appendChild(makeTabGroup(categoryLabels, 0, function (idx) {
+      activeCategory = categoryKeys[idx];
+      render();
+    }));
 
     panel.appendChild(makeTabGroup(["最新順", "話題順"], 0, function (idx) {
-      sort = idx === 0 ? "newest" : "popular";
+      activeSort = idx === 0 ? "newest" : "popular";
       render();
     }));
     panel.appendChild(listWrap);
@@ -224,7 +385,7 @@
 
     var categoryWrap = el("div");
     var sortWrap = el("div");
-    var listWrap = el("div");
+    var listWrap = el("div", "list-scroll");
 
     var activeRegionIdx = 0;
     var activeCategory = "all";
@@ -332,7 +493,7 @@
     var catKeys = ["all"].concat(keys);
 
     var sortWrap = el("div");
-    var listWrap = el("div");
+    var listWrap = el("div", "list-scroll");
     var activeCatIdx = 0;
     var activeSort = "newest";
 
@@ -373,7 +534,7 @@
 
   function render(data) {
     board.innerHTML = "";
-    board.appendChild(buildToyotaPanel(data.sections.toyota_news));
+    board.appendChild(buildToyotaPanel(data.sections.toyota_news, data.sections.toyota_stock, data.sections.toyota_earnings));
     board.appendChild(buildIndustryPanel(data.sections.industry_news));
     board.appendChild(buildMotorsportsPanel(data.sections.motorsports));
 

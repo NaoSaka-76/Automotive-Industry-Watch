@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+from .categorize import attach_category
 from .common import dedupe_by_url, fetch_google_news_rss, sort_by_recency, sort_by_relevance
 
 QUERIES = [
@@ -26,7 +27,7 @@ def fetch(limit_per_query: int = 12) -> dict:
             r["_query_key"] = query
         raw.extend(results)
 
-    deduped = dedupe_by_url(raw)
+    deduped = attach_category(dedupe_by_url(raw))
     return {
         "newest": sort_by_recency(deduped),
         "popular": sort_by_relevance(deduped),

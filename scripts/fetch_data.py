@@ -10,7 +10,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from sources import industry_news, motorsports, toyota_news
+from sources import earnings, industry_news, motorsports, stock, toyota_news
 
 JST = timezone(timedelta(hours=9))
 OUTPUT_PATH = Path(__file__).resolve().parent.parent / "site" / "data" / "latest.json"
@@ -25,6 +25,8 @@ def build_dashboard() -> dict:
         "generated_at_jst": now_jst.strftime("%Y-%m-%d %H:%M JST"),
         "sections": {
             "toyota_news": toyota_news.fetch(),
+            "toyota_stock": stock.fetch(),
+            "toyota_earnings": earnings.fetch(),
             "industry_news": {"regions": industry_news.fetch()},
             "motorsports": {"categories": motorsports.fetch()},
         },
