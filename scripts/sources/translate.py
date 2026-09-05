@@ -1,10 +1,12 @@
 """英語見出しの簡易日本語訳(MyMemory Translation API、APIキー不要)。
 
 無料・無認証の翻訳APIのため、1日あたりの文字数に上限がある(匿名利用で
-無料枠5000文字/日程度)。上限に達した場合や取得失敗時は翻訳を諦め、
+無料枠5000文字/日程度)。ダッシュボード全体(トヨタ自動車トピックス・
+自動車産業トピックス・モータースポーツ)の英語見出し全件を対象とするため、
+1日の無料枠を超える可能性がある。上限に達した場合や取得失敗時は翻訳を諦め、
 呼び出し側で日本語訳フィールドを省略する(見出し自体は表示されるので
-壊れない)。トヨタ自動車トピックスのみを対象とし、1回の実行あたりの
-翻訳件数に上限を設けて過度なAPI利用を避ける。
+壊れない)。新着順で上位のものから翻訳することで、枠を使い切っても
+直近の話題は優先的に翻訳される。
 """
 
 from __future__ import annotations
@@ -16,8 +18,6 @@ import requests
 from .common import REQUEST_TIMEOUT, USER_AGENT
 
 _JAPANESE_RE = re.compile(r"[぀-ヿ一-鿿]")
-
-MAX_ITEMS_PER_RUN = 30
 
 
 def is_english(text: str) -> bool:
@@ -44,16 +44,17 @@ def translate_to_japanese(text: str) -> str | None:
         return None
 
 
-def attach_translations(items: list[dict], max_items: int = MAX_ITEMS_PER_RUN) -> list[dict]:
-    translated_count = 0
+def attach_translations(items: list[dict]) -> list[dict]:
+    """英語見出しの全件に翻訳を試みる(新着順など、呼び出し側が渡した順)。
+
+    無料枠を使い切ると個々の呼び出しが失敗するようになるが、
+    translate_to_japanese側でNoneを返すだけなので処理は継続する。
+    """
     for item in items:
-        if translated_count >= max_items:
-            break
         title = item.get("title", "")
         if not is_english(title):
             continue
         ja = translate_to_japanese(title)
-        translated_count += 1
         if ja:
             item["title_ja"] = ja
     return items

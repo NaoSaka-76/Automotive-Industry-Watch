@@ -201,11 +201,139 @@
     return "¥" + Math.round(n).toLocaleString("ja-JP");
   }
 
+  function jstDate(t) {
+    // tはUnix秒(UTC)。日本株なので表示はJST(UTC+9)に固定する。
+    return new Date((t + 9 * 3600) * 1000);
+  }
+
+  function fmtTime(t) {
+    var d = jstDate(t);
+    var hh = String(d.getUTCHours()).padStart(2, "0");
+    var mm = String(d.getUTCMinutes()).padStart(2, "0");
+    return hh + ":" + mm;
+  }
+
+  function fmtDateShort(t) {
+    var d = jstDate(t);
+    return (d.getUTCMonth() + 1) + "/" + d.getUTCDate();
+  }
+
+  function fmtDateMonth(t) {
+    var d = jstDate(t);
+    return d.getUTCFullYear() + "/" + String(d.getUTCMonth() + 1).padStart(2, "0");
+  }
+
+  function dayKey(t) {
+    var d = jstDate(t);
+    return d.getUTCFullYear() + "-" + d.getUTCMonth() + "-" + d.getUTCDate();
+  }
+
+  var STOCK_PERIODS = [
+    { key: "1d", label: "日", source: "intraday", xFmt: fmtTime, filter: function (pts) {
+      if (!pts.length) return [];
+      var lastKey = dayKey(pts[pts.length - 1].t);
+      return pts.filter(function (p) { return dayKey(p.t) === lastKey; });
+    } },
+    { key: "1w", label: "週", source: "intraday", xFmt: fmtDateShort, filter: function (pts) { return pts; } },
+    { key: "1mo", label: "月", source: "daily", xFmt: fmtDateShort, filter: function (pts) { return sliceLastNDays(pts, 31); } },
+    { key: "3mo", label: "3ヶ月", source: "daily", xFmt: fmtDateShort, filter: function (pts) { return sliceLastNDays(pts, 92); } },
+    { key: "6mo", label: "6ヶ月", source: "daily", xFmt: fmtDateMonth, filter: function (pts) { return sliceLastNDays(pts, 183); } },
+    { key: "1y", label: "1年", source: "daily", xFmt: fmtDateMonth, filter: function (pts) { return pts; } },
+  ];
+
+  function sliceLastNDays(pts, days) {
+    if (!pts.length) return [];
+    var cutoff = pts[pts.length - 1].t - days * 86400;
+    return pts.filter(function (p) { return p.t >= cutoff; });
+  }
+
+  function niceTicks(min, max, count) {
+    var ticks = [];
+    for (var i = 0; i < count; i++) ticks.push(min + ((max - min) * i) / (count - 1));
+    return ticks;
+  }
+
+  function renderStockSVG(points, xFmt) {
+    var W = 640, H = 260;
+    var marginLeft = 58, marginRight = 12, marginTop = 12, marginBottom = 26;
+    var plotW = W - marginLeft - marginRight;
+    var plotH = H - marginTop - marginBottom;
+
+    var svg = svgEl("svg", { viewBox: "0 0 " + W + " " + H, class: "stock-card__chart" });
+
+    if (!points || points.length === 0) {
+      var emptyText = svgEl("text", { x: W / 2, y: H / 2, "text-anchor": "middle", "font-size": "13" });
+      emptyText.style.fill = "var(--ink-muted)";
+      emptyText.textContent = "データがありません";
+      svg.appendChild(emptyText);
+      return svg;
+    }
+
+    var closes = points.map(function (p) { return p.close; });
+    var rawMin = Math.min.apply(null, closes);
+    var rawMax = Math.max.apply(null, closes);
+    var pad = (rawMax - rawMin) * 0.08 || rawMax * 0.02 || 1;
+    var min = rawMin - pad;
+    var max = rawMax + pad;
+    var range = max - min || 1;
+    var up = points[points.length - 1].close >= points[0].close;
+
+    function xAt(i) { return marginLeft + (i / Math.max(1, points.length - 1)) * plotW; }
+    function yAt(v) { return marginTop + (1 - (v - min) / range) * plotH; }
+
+    // Y軸: 目盛線とラベル
+    var yTicks = niceTicks(min, max, 4);
+    yTicks.forEach(function (v) {
+      var y = yAt(v);
+      var gridline = svgEl("line", { x1: marginLeft, x2: W - marginRight, y1: y.toFixed(1), y2: y.toFixed(1) });
+      gridline.style.stroke = "var(--line)";
+      gridline.setAttribute("stroke-width", "1");
+      svg.appendChild(gridline);
+
+      var label = svgEl("text", { x: marginLeft - 8, y: (y + 3.5).toFixed(1), "text-anchor": "end", "font-size": "11" });
+      label.style.fill = "var(--ink-muted)";
+      label.textContent = "¥" + Math.round(v).toLocaleString("ja-JP");
+      svg.appendChild(label);
+    });
+
+    // X軸: 5点の目盛ラベル
+    var xTickCount = Math.min(5, points.length);
+    for (var i = 0; i < xTickCount; i++) {
+      var idx = Math.round((i / Math.max(1, xTickCount - 1)) * (points.length - 1));
+      var x = xAt(idx);
+      // 端のラベルは中央揃えだとviewBox外にはみ出るため、両端だけ内側寄せにする。
+      var anchor = i === 0 ? "start" : i === xTickCount - 1 ? "end" : "middle";
+      var xLabel = svgEl("text", { x: x.toFixed(1), y: H - 6, "text-anchor": anchor, "font-size": "11" });
+      xLabel.style.fill = "var(--ink-muted)";
+      xLabel.textContent = xFmt(points[idx].t);
+      svg.appendChild(xLabel);
+    }
+
+    // 折れ線 + 塗りつぶし
+    var linePoints = points.map(function (p, i) { return xAt(i).toFixed(1) + "," + yAt(p.close).toFixed(1); });
+    var areaPoints = linePoints.concat([
+      xAt(points.length - 1).toFixed(1) + "," + (marginTop + plotH),
+      xAt(0).toFixed(1) + "," + (marginTop + plotH),
+    ]).join(" ");
+    var area = svgEl("polygon", { points: areaPoints });
+    area.style.fill = up ? "rgba(255,90,90,0.14)" : "rgba(63,208,208,0.14)";
+    svg.appendChild(area);
+
+    var line = svgEl("polyline", {
+      points: linePoints.join(" "), fill: "none", "stroke-width": "2",
+      "stroke-linejoin": "round", "stroke-linecap": "round",
+    });
+    line.style.stroke = up ? "var(--critical)" : "var(--cat-new_tech)";
+    svg.appendChild(line);
+
+    return svg;
+  }
+
   function buildStockChart(stock) {
     var card = el("div", "stock-card");
     card.appendChild(el("div", "stock-card__title", "トヨタ自動車 株価 (7203.T)"));
 
-    if (!stock || stock.error || !stock.history || stock.history.length === 0) {
+    if (!stock || stock.error || (!stock.daily && !stock.intraday)) {
       card.appendChild(el("p", "panel__empty", "株価データを取得できませんでした。"));
       return card;
     }
@@ -215,49 +343,55 @@
 
     var priceRow = el("div", "stock-card__price-row");
     priceRow.appendChild(el("span", "stock-card__price", formatYen0(stock.price)));
-    priceRow.appendChild(el(
-      "span",
-      "stock-card__change " + (up ? "stock-card__change--up" : "stock-card__change--down"),
-      sign + stock.change.toFixed(1) + " (" + sign + stock.change_percent.toFixed(2) + "%)"
-    ));
+    if (stock.change != null && stock.change_percent != null) {
+      priceRow.appendChild(el(
+        "span",
+        "stock-card__change " + (up ? "stock-card__change--up" : "stock-card__change--down"),
+        sign + stock.change.toFixed(1) + " (" + sign + stock.change_percent.toFixed(2) + "%)"
+      ));
+    }
     card.appendChild(priceRow);
 
-    var history = stock.history;
-    var closes = history.map(function (h) { return h.close; });
-    var min = Math.min.apply(null, closes);
-    var max = Math.max.apply(null, closes);
-    var range = max - min || 1;
-    var W = 600, H = 160, padX = 4, padY = 10;
-
-    var points = history.map(function (h, i) {
-      var x = padX + (i / Math.max(1, history.length - 1)) * (W - padX * 2);
-      var y = padY + (1 - (h.close - min) / range) * (H - padY * 2);
-      return x.toFixed(1) + "," + y.toFixed(1);
-    });
-
-    var svg = svgEl("svg", { viewBox: "0 0 " + W + " " + H, class: "stock-card__chart", preserveAspectRatio: "none" });
-    var areaPoints = points.concat([(W - padX) + "," + (H - padY), padX + "," + (H - padY)]).join(" ");
-    var area = svgEl("polygon", { points: areaPoints });
-    area.style.fill = up ? "rgba(255,90,90,0.14)" : "rgba(63,208,208,0.14)";
-    svg.appendChild(area);
-
-    var line = svgEl("polyline", {
-      points: points.join(" "), fill: "none", "stroke-width": "2",
-      "stroke-linejoin": "round", "stroke-linecap": "round",
-    });
-    line.style.stroke = up ? "var(--critical)" : "var(--cat-new_tech)";
-    svg.appendChild(line);
-
-    card.appendChild(svg);
-
+    var periodTabs = el("div", "tab-group");
+    var chartWrap = el("div");
     var rangeRow = el("div", "stock-card__range");
-    rangeRow.appendChild(el("span", null, "直近3ヶ月 安値 " + formatYen0(min)));
-    rangeRow.appendChild(el("span", null, "高値 " + formatYen0(max)));
+    card.appendChild(periodTabs);
+    card.appendChild(chartWrap);
     card.appendChild(rangeRow);
+
+    var defaultIdx = 3; // 3ヶ月
+    var buttons = STOCK_PERIODS.map(function (period, idx) {
+      var btn = el("button", "tab-group__btn" + (idx === defaultIdx ? " is-active" : ""), period.label);
+      btn.addEventListener("click", function () {
+        buttons.forEach(function (b, i) { b.classList.toggle("is-active", i === idx); });
+        renderPeriod(period);
+      });
+      periodTabs.appendChild(btn);
+      return btn;
+    });
+
+    function renderPeriod(period) {
+      var source = (period.source === "intraday" ? stock.intraday : stock.daily) || [];
+      var points = period.filter(source.slice());
+      chartWrap.innerHTML = "";
+      chartWrap.appendChild(renderStockSVG(points, period.xFmt));
+
+      rangeRow.innerHTML = "";
+      if (points.length > 0) {
+        var closes = points.map(function (p) { return p.close; });
+        var min = Math.min.apply(null, closes);
+        var max = Math.max.apply(null, closes);
+        rangeRow.appendChild(el("span", null, "安値 " + formatYen0(min)));
+        rangeRow.appendChild(el("span", null, "高値 " + formatYen0(max)));
+      }
+    }
+
+    renderPeriod(STOCK_PERIODS[defaultIdx]);
 
     card.appendChild(el(
       "p", "panel__note stock-card__note",
-      "終値ベース・日次(" + history[history.length - 1].date + "時点)。データ提供: Yahoo Finance(非公式・無認証エンドポイント)。"
+      "終値ベース。データ提供: Yahoo Finance(非公式・無認証エンドポイント)。「日」「週」は15分足、" +
+      "「月」以降は日足を表示しています。"
     ));
 
     return card;
@@ -274,17 +408,17 @@
 
   function buildEarningsCard(earnings) {
     var card = el("div", "earnings-card");
-    card.appendChild(el("div", "earnings-card__title", "最新決算ダイジェスト"));
+    card.appendChild(el("div", "earnings-card__title", "直近四半期決算(前年同期比)"));
 
-    if (!earnings || earnings.error || !earnings.latest) {
+    if (!earnings || earnings.error || !earnings.quarterly) {
       card.appendChild(el("p", "panel__empty", "決算データを取得できませんでした。"));
       return card;
     }
 
-    var latest = earnings.latest;
+    var q = earnings.quarterly;
     card.appendChild(el(
       "div", "earnings-card__period",
-      (latest.release_title || latest.period_label) + (latest.announced ? " ・発表日 " + latest.announced : "")
+      (q.release_title || q.period_label) + (q.announced ? " ・発表日 " + q.announced : "")
     ));
 
     var rows = [
@@ -296,8 +430,8 @@
 
     var grid = el("div", "earnings-card__grid");
     rows.forEach(function (r) {
-      var value = latest[r.key];
-      var yoy = latest[r.key + "_yoy"];
+      var value = q[r.key];
+      var yoy = q[r.key + "_yoy"];
       var cell = el("div", "earnings-card__cell");
       cell.appendChild(el("div", "earnings-card__cell-label", r.label));
       cell.appendChild(el("div", "earnings-card__cell-value", formatMillionYen(value)));
@@ -313,8 +447,8 @@
     card.appendChild(grid);
 
     var extra = el("div", "earnings-card__extra");
-    if (latest.eps != null) extra.appendChild(el("span", null, "EPS " + latest.eps + "円"));
-    if (latest.operating_margin != null) extra.appendChild(el("span", null, "営業利益率 " + latest.operating_margin + "%"));
+    if (q.eps != null) extra.appendChild(el("span", null, "EPS " + q.eps + "円"));
+    if (q.operating_margin != null) extra.appendChild(el("span", null, "営業利益率 " + q.operating_margin + "%"));
     if (extra.children.length > 0) card.appendChild(extra);
 
     var note = el("p", "panel__note earnings-card__note");
@@ -326,13 +460,132 @@
     link.target = "_blank";
     link.rel = "noopener noreferrer";
     note.appendChild(link);
-    if (latest.pdf_url) {
+    if (q.pdf_url) {
       note.appendChild(document.createTextNode(" "));
       var pdfLink = el("a", null, "決算要旨PDF ↗");
-      pdfLink.href = latest.pdf_url;
+      pdfLink.href = q.pdf_url;
       pdfLink.target = "_blank";
       pdfLink.rel = "noopener noreferrer";
       note.appendChild(pdfLink);
+    }
+    card.appendChild(note);
+
+    return card;
+  }
+
+  // ---- ① トヨタ自動車: 通期業績比較(実績/期初見通し/最新見通し) --------------
+
+  function pctDelta(latest, base) {
+    if (latest == null || base == null || base === 0) return null;
+    return ((latest - base) / Math.abs(base)) * 100;
+  }
+
+  function buildFullYearComparisonCard(earnings) {
+    var card = el("div", "panel panel--full fullyear-card");
+    card.appendChild(el("div", "earnings-card__title", "通期業績比較(全年期実績 / 期初見通し / 最新見通し)"));
+
+    var fy = earnings && earnings.full_year;
+    if (!earnings || earnings.error || !fy || !fy.prior_actual || !fy.initial_forecast || !fy.latest_forecast) {
+      card.appendChild(el("p", "panel__empty", "通期業績データを取得できませんでした。"));
+      return card;
+    }
+
+    var prior = fy.prior_actual;
+    var initial = fy.initial_forecast;
+    var latestFc = fy.latest_forecast;
+
+    function extractParenDate(text) {
+      var m = /[（(](.*?)[）)]/.exec(text || "");
+      return m ? m[1] : "";
+    }
+
+    var table = el("table", "fullyear-table");
+    var thead = el("thead");
+    var headRow = el("tr");
+    headRow.appendChild(el("th", "fullyear-table__row-label"));
+    [
+      { title: "全年期実績", sub: prior.period_label },
+      { title: "期初見通し", sub: extractParenDate(fy.prior_release_title) + "時点" },
+      { title: "最新見通し", sub: (earnings.quarterly.announced || "") + "時点" },
+    ].forEach(function (h) {
+      var th = el("th");
+      th.appendChild(el("div", "fullyear-table__head-title", h.title));
+      if (h.sub) th.appendChild(el("div", "fullyear-table__head-sub", h.sub));
+      headRow.appendChild(th);
+    });
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+
+    var metricRows = [
+      { key: "revenue", label: "営業収益" },
+      { key: "operating_income", label: "営業利益" },
+      { key: "income_before_tax", label: "税引前利益" },
+      { key: "net_income", label: "親会社帰属利益" },
+    ];
+
+    var tbody = el("tbody");
+    metricRows.forEach(function (m) {
+      var tr = el("tr");
+      tr.appendChild(el("th", "fullyear-table__row-label", m.label));
+
+      // 全年期実績(前期比のみ参考表示)
+      var priorCell = el("td");
+      priorCell.appendChild(el("div", "fullyear-table__value", formatMillionYen(prior[m.key])));
+      tbody.appendChild(tr);
+      tr.appendChild(priorCell);
+
+      // 期初見通し(全年期実績との比較)
+      var initialCell = el("td");
+      initialCell.appendChild(el("div", "fullyear-table__value", formatMillionYen(initial[m.key])));
+      var initialYoy = initial[m.key + "_yoy"];
+      if (initialYoy != null) {
+        var initUp = initialYoy >= 0;
+        initialCell.appendChild(el(
+          "div", "earnings-card__yoy " + (initUp ? "earnings-card__yoy--up" : "earnings-card__yoy--down"),
+          "前期比 " + (initUp ? "+" : "") + initialYoy.toFixed(1) + "%"
+        ));
+      }
+      tr.appendChild(initialCell);
+
+      // 最新見通し(全年期実績との比較 + 期初見通しからの修正幅)
+      var latestCell = el("td");
+      latestCell.appendChild(el("div", "fullyear-table__value", formatMillionYen(latestFc[m.key])));
+      var latestYoy = latestFc[m.key + "_yoy"];
+      if (latestYoy != null) {
+        var lUp = latestYoy >= 0;
+        latestCell.appendChild(el(
+          "div", "earnings-card__yoy " + (lUp ? "earnings-card__yoy--up" : "earnings-card__yoy--down"),
+          "前期比 " + (lUp ? "+" : "") + latestYoy.toFixed(1) + "%"
+        ));
+      }
+      var revision = pctDelta(latestFc[m.key], initial[m.key]);
+      if (revision != null) {
+        var revUp = revision >= 0;
+        latestCell.appendChild(el(
+          "div", "fullyear-table__revision " + (revUp ? "earnings-card__yoy--up" : "earnings-card__yoy--down"),
+          "期初比 " + (revUp ? "+" : "") + revision.toFixed(1) + "%"
+        ));
+      }
+      tr.appendChild(latestCell);
+    });
+    table.appendChild(tbody);
+
+    var tableWrap = el("div", "list-scroll fullyear-table-wrap");
+    tableWrap.appendChild(table);
+    card.appendChild(tableWrap);
+
+    var note = el("p", "panel__note earnings-card__note");
+    note.appendChild(document.createTextNode(
+      "「期初見通し」は" + (fy.prior_release_title || "前期決算") + "で発表された翌期予想、" +
+      "「最新見通し」は直近四半期決算で更新された今期予想です。「前期比」は全年期実績との比較、" +
+      "「期初比」は期初見通しからの修正幅です。出典: トヨタ自動車 投資家情報(公式)。 "
+    ));
+    if (fy.prior_pdf_url) {
+      var priorLink = el("a", null, "前期決算要旨PDF ↗");
+      priorLink.href = fy.prior_pdf_url;
+      priorLink.target = "_blank";
+      priorLink.rel = "noopener noreferrer";
+      note.appendChild(priorLink);
     }
     card.appendChild(note);
 
@@ -350,6 +603,8 @@
     topRow.appendChild(buildStockChart(stockData));
     topRow.appendChild(buildEarningsCard(earningsData));
     panel.appendChild(topRow);
+
+    panel.appendChild(buildFullYearComparisonCard(earningsData));
 
     panel.appendChild(el("p", "panel__note", "トヨタ自動車に関するニュースをGoogleニュース検索から日英で集約し、見出しのキーワードから新製品・新技術・規制・経営・政策・他へ自動分類しています(参考値)。"));
 

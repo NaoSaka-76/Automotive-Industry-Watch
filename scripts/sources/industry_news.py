@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from .categorize import attach_category
 from .common import dedupe_by_url, fetch_google_news_rss, sort_by_recency, sort_by_relevance
+from .translate import attach_translations
 
 # 各地域: (表示名, 絵文字, [(query, hl, gl, ceid), ...])
 REGIONS: dict[str, dict] = {
@@ -114,10 +115,11 @@ def _fetch_region(queries: list[tuple], limit_per_query: int = 10) -> dict:
         raw.extend(results)
 
     deduped = attach_category(dedupe_by_url(raw))
-    return {
-        "newest": sort_by_recency(deduped),
-        "popular": sort_by_relevance(deduped),
-    }
+    newest = sort_by_recency(deduped)
+    popular = sort_by_relevance(deduped)
+    # newestとpopularは同じdictを共有しているため、新着順で処理すれば両方に反映される。
+    attach_translations(newest)
+    return {"newest": newest, "popular": popular}
 
 
 def fetch() -> dict:
