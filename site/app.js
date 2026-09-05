@@ -827,9 +827,8 @@
     cybersecurity: "サイバーセキュリティ規制",
   };
 
-  function mergeRegulationLists(categories, keys, listKey) {
+  function mergePools(pools) {
     var seen = {};
-    var pools = keys.map(function (k) { return (categories[k][listKey] && categories[k][listKey].newest) || []; });
     var flat = [].concat.apply([], pools);
     flat.sort(function (a, b) {
       var ta = a.published ? Date.parse(a.published) : 0;
@@ -877,24 +876,35 @@
       "名称を含む報道を中心に集約したものです(キーワード検索による自動集計のため参考値)。"
     ));
 
-    var regionLabels = regionKeys.map(function (k) { return (regions[k].flag || "") + " " + regions[k].label; });
+    var GLOBAL_REGION = "__global__";
+    var allRegionKeys = [GLOBAL_REGION].concat(regionKeys);
+    var allRegionLabels = ["🌍 グローバル"].concat(
+      regionKeys.map(function (k) { return (regions[k].flag || "") + " " + regions[k].label; })
+    );
+
     var categoryWrap = el("div");
     var contentWrap = el("div");
 
-    var activeRegionIdx = 0;
+    var activeRegionKey = GLOBAL_REGION;
     var activeCategory = "all";
+
+    function poolsFor(listKey) {
+      var regionsToUse = activeRegionKey === GLOBAL_REGION ? regionKeys : [activeRegionKey];
+      var categoriesToUse = activeCategory === "all" ? REGULATION_CATEGORY_ORDER : [activeCategory];
+      var pools = [];
+      regionsToUse.forEach(function (rk) {
+        var cats = regions[rk].categories;
+        categoriesToUse.forEach(function (ck) {
+          pools.push((cats[ck][listKey] && cats[ck][listKey].newest) || []);
+        });
+      });
+      return pools;
+    }
 
     function renderContent() {
       contentWrap.innerHTML = "";
-      var cats = regions[regionKeys[activeRegionIdx]].categories;
-      var summaryItems, authorityItems;
-      if (activeCategory === "all") {
-        summaryItems = mergeRegulationLists(cats, REGULATION_CATEGORY_ORDER, "summary");
-        authorityItems = mergeRegulationLists(cats, REGULATION_CATEGORY_ORDER, "authority");
-      } else {
-        summaryItems = cats[activeCategory].summary.newest;
-        authorityItems = cats[activeCategory].authority.newest;
-      }
+      var summaryItems = mergePools(poolsFor("summary"));
+      var authorityItems = mergePools(poolsFor("authority"));
       var grid = el("div", "reg-grid");
       grid.appendChild(buildRegulationSubPanel("最新サマリー", summaryItems));
       grid.appendChild(buildRegulationSubPanel("当局の最新トピックス", authorityItems));
@@ -911,8 +921,8 @@
       }));
     }
 
-    var regionTabs = makeTabGroup(regionLabels, activeRegionIdx, function (idx) {
-      activeRegionIdx = idx;
+    var regionTabs = makeTabGroup(allRegionLabels, allRegionKeys.indexOf(activeRegionKey), function (idx) {
+      activeRegionKey = allRegionKeys[idx];
       activeCategory = "all";
       renderCategoryTabs();
       renderContent();
