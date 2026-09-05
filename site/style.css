@@ -490,6 +490,29 @@ a { color: inherit; }
   font-weight: 600;
 }
 
+/* ---- regulations: summary + authority two-column layout ---- */
+
+.reg-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 10px;
+}
+
+@media (max-width: 820px) {
+  .reg-grid { grid-template-columns: 1fr; }
+}
+
+.reg-subpanel__title {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: 4px;
+}
+
 /* ---- item list ---- */
 
 .list-scroll {

@@ -10,6 +10,8 @@
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v18"/><path d="M5 4h14l-3 3.5 3 3.5H5z"/></svg>',
     clock:
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l3 2"/><path d="M9 2h6"/></svg>',
+    shield:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5.5c0 4.6-3 8.3-7 9.5-4-1.2-7-4.9-7-9.5V6z"/><path d="M9 12l2 2 4-4.5"/></svg>',
   };
 
   var CATEGORY_ORDER = ["new_product", "new_tech", "regulation", "management", "policy", "other"];
@@ -162,6 +164,19 @@
         return sum + (cats[key] ? countRecent(cats[key].newest) : 0);
       }, 0);
       rows.push({ label: "③ モータースポーツ", count: motorsportsCount, anchor: "section-motorsports" });
+    }
+    if (sections.regulations && sections.regulations.regions) {
+      var regRegions = sections.regulations.regions;
+      var regCount = 0;
+      REGULATION_REGION_ORDER.forEach(function (rk) {
+        var r = regRegions[rk];
+        if (!r) return;
+        REGULATION_CATEGORY_ORDER.forEach(function (ck) {
+          var c = r.categories[ck];
+          regCount += countRecent(c.summary.newest) + countRecent(c.authority.newest);
+        });
+      });
+      rows.push({ label: "④ 規制動向", count: regCount, anchor: "section-regulations" });
     }
 
     var totalCount = rows.reduce(function (sum, r) { return sum + r.count; }, 0);
@@ -801,6 +816,118 @@
     return panel;
   }
 
+  // ---- ④ 規制動向(地域×カテゴリー、サマリー/当局トピックス) -------------------
+
+  var REGULATION_REGION_ORDER = ["japan", "us", "europe", "china"];
+  var REGULATION_CATEGORY_ORDER = ["emissions", "safety", "noise", "cybersecurity"];
+  var REGULATION_CATEGORY_LABEL = {
+    emissions: "排気規制",
+    safety: "安全性能規制",
+    noise: "騒音規制",
+    cybersecurity: "サイバーセキュリティ規制",
+  };
+
+  function mergeRegulationLists(categories, keys, listKey) {
+    var seen = {};
+    var pools = keys.map(function (k) { return (categories[k][listKey] && categories[k][listKey].newest) || []; });
+    var flat = [].concat.apply([], pools);
+    flat.sort(function (a, b) {
+      var ta = a.published ? Date.parse(a.published) : 0;
+      var tb = b.published ? Date.parse(b.published) : 0;
+      return tb - ta;
+    });
+    var out = [];
+    flat.forEach(function (item) {
+      var k = item.url || item.title;
+      if (k && seen[k]) return;
+      if (k) seen[k] = true;
+      out.push(item);
+    });
+    return out;
+  }
+
+  function buildRegulationSubPanel(title, items) {
+    var wrap = el("div", "reg-subpanel");
+    wrap.appendChild(el("div", "reg-subpanel__title", title + "(" + (items ? items.length : 0) + ")"));
+    var listWrap = el("div", "list-scroll");
+    renderInto(listWrap, items);
+    wrap.appendChild(listWrap);
+    return wrap;
+  }
+
+  function buildRegulationsPanel(section) {
+    var regions = section.regions || {};
+    var regionKeys = REGULATION_REGION_ORDER.filter(function (k) { return regions[k]; });
+    var panel = el("section", "panel panel--full");
+    panel.id = "section-regulations";
+
+    var totalCount = regionKeys.reduce(function (sum, rk) {
+      var cats = regions[rk].categories;
+      return sum + REGULATION_CATEGORY_ORDER.reduce(function (s2, ck) {
+        return s2 + cats[ck].summary.newest.length + cats[ck].authority.newest.length;
+      }, 0);
+    }, 0);
+
+    panel.appendChild(buildPanelHeader("shield", "④ 規制動向(排気・安全性能・騒音・サイバーセキュリティ)", totalCount));
+    panel.appendChild(el(
+      "p", "panel__note",
+      "日本・アメリカ・ヨーロッパ・中国における自動車開発に影響する規制動向を、排気規制・安全性能規制・" +
+      "騒音規制・サイバーセキュリティ規制の4カテゴリーで集約しています。「最新サマリー」は規制動向に" +
+      "関する報道全般、「当局の最新トピックス」は所管当局(国土交通省・NHTSA・欧州委員会/UNECE・MIIT等)の" +
+      "名称を含む報道を中心に集約したものです(キーワード検索による自動集計のため参考値)。"
+    ));
+
+    var regionLabels = regionKeys.map(function (k) { return (regions[k].flag || "") + " " + regions[k].label; });
+    var categoryWrap = el("div");
+    var contentWrap = el("div");
+
+    var activeRegionIdx = 0;
+    var activeCategory = "all";
+
+    function renderContent() {
+      contentWrap.innerHTML = "";
+      var cats = regions[regionKeys[activeRegionIdx]].categories;
+      var summaryItems, authorityItems;
+      if (activeCategory === "all") {
+        summaryItems = mergeRegulationLists(cats, REGULATION_CATEGORY_ORDER, "summary");
+        authorityItems = mergeRegulationLists(cats, REGULATION_CATEGORY_ORDER, "authority");
+      } else {
+        summaryItems = cats[activeCategory].summary.newest;
+        authorityItems = cats[activeCategory].authority.newest;
+      }
+      var grid = el("div", "reg-grid");
+      grid.appendChild(buildRegulationSubPanel("最新サマリー", summaryItems));
+      grid.appendChild(buildRegulationSubPanel("当局の最新トピックス", authorityItems));
+      contentWrap.appendChild(grid);
+    }
+
+    function renderCategoryTabs() {
+      categoryWrap.innerHTML = "";
+      var labels = ["すべて"].concat(REGULATION_CATEGORY_ORDER.map(function (k) { return REGULATION_CATEGORY_LABEL[k]; }));
+      var keys = ["all"].concat(REGULATION_CATEGORY_ORDER);
+      categoryWrap.appendChild(makeTabGroup(labels, keys.indexOf(activeCategory), function (idx) {
+        activeCategory = keys[idx];
+        renderContent();
+      }));
+    }
+
+    var regionTabs = makeTabGroup(regionLabels, activeRegionIdx, function (idx) {
+      activeRegionIdx = idx;
+      activeCategory = "all";
+      renderCategoryTabs();
+      renderContent();
+    }, "tab-group--region");
+
+    panel.appendChild(regionTabs);
+    panel.appendChild(categoryWrap);
+    panel.appendChild(contentWrap);
+
+    renderCategoryTabs();
+    renderContent();
+
+    return panel;
+  }
+
   // ---- rendering entrypoint ------------------------------------------------
 
   function render(data) {
@@ -808,6 +935,9 @@
     board.appendChild(buildToyotaPanel(data.sections.toyota_news, data.sections.toyota_stock, data.sections.toyota_earnings));
     board.appendChild(buildIndustryPanel(data.sections.industry_news));
     board.appendChild(buildMotorsportsPanel(data.sections.motorsports));
+    if (data.sections.regulations) {
+      board.appendChild(buildRegulationsPanel(data.sections.regulations));
+    }
 
     statsEl.innerHTML = "";
     statsEl.appendChild(buildDigestPanel(data));
