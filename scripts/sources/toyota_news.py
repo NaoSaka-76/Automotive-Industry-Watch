@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from .categorize import attach_category
 from .common import dedupe_by_url, fetch_google_news_rss, sort_by_recency, sort_by_relevance
-from .translate import attach_translations
 
 QUERIES = [
     ("トヨタ自動車", "ja", "JP", "JP:ja"),
@@ -31,7 +30,4 @@ def fetch(limit_per_query: int = 12) -> dict:
     deduped = attach_category(dedupe_by_url(raw))
     newest = sort_by_recency(deduped)
     popular = sort_by_relevance(deduped)
-    # 翻訳件数には上限があるため、新着順で上位のものから優先的に翻訳する
-    # (newestとpopularは同じdictを共有しているため、ここで付与すれば両方に反映される)。
-    attach_translations(newest)
     return {"newest": newest, "popular": popular}

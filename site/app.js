@@ -268,7 +268,10 @@
     return ticks;
   }
 
-  function renderStockSVG(points, xFmt) {
+  // 複数系列(トヨタ単体の絶対株価、または複数メーカーの騰落率%比較)に対応した
+  // 汎用チャートレンダラー。系列ごとに時刻(t)ベースでX座標を揃えるため、
+  // 銘柄間で取引日・時刻が多少ずれていても正しく重ね描きできる。
+  function renderStockSVG(seriesList, xFmt, yFormat) {
     var W = 640, H = 260;
     var marginLeft = 58, marginRight = 12, marginTop = 12, marginBottom = 26;
     var plotW = W - marginLeft - marginRight;
@@ -276,7 +279,8 @@
 
     var svg = svgEl("svg", { viewBox: "0 0 " + W + " " + H, class: "stock-card__chart" });
 
-    if (!points || points.length === 0) {
+    var allPoints = [].concat.apply([], seriesList.map(function (s) { return s.points; }));
+    if (allPoints.length === 0) {
       var emptyText = svgEl("text", { x: W / 2, y: H / 2, "text-anchor": "middle", "font-size": "13" });
       emptyText.style.fill = "var(--ink-muted)";
       emptyText.textContent = "データがありません";
@@ -284,21 +288,22 @@
       return svg;
     }
 
-    var closes = points.map(function (p) { return p.close; });
-    var rawMin = Math.min.apply(null, closes);
-    var rawMax = Math.max.apply(null, closes);
-    var pad = (rawMax - rawMin) * 0.08 || rawMax * 0.02 || 1;
+    var allT = allPoints.map(function (p) { return p.t; });
+    var minT = Math.min.apply(null, allT);
+    var maxT = Math.max.apply(null, allT);
+    var allV = allPoints.map(function (p) { return p.value; });
+    var rawMin = Math.min.apply(null, allV);
+    var rawMax = Math.max.apply(null, allV);
+    var pad = (rawMax - rawMin) * 0.08 || Math.abs(rawMax) * 0.02 || 1;
     var min = rawMin - pad;
     var max = rawMax + pad;
     var range = max - min || 1;
-    var up = points[points.length - 1].close >= points[0].close;
 
-    function xAt(i) { return marginLeft + (i / Math.max(1, points.length - 1)) * plotW; }
+    function xAt(t) { return marginLeft + ((t - minT) / (maxT - minT || 1)) * plotW; }
     function yAt(v) { return marginTop + (1 - (v - min) / range) * plotH; }
 
     // Y軸: 目盛線とラベル
-    var yTicks = niceTicks(min, max, 4);
-    yTicks.forEach(function (v) {
+    niceTicks(min, max, 4).forEach(function (v) {
       var y = yAt(v);
       var gridline = svgEl("line", { x1: marginLeft, x2: W - marginRight, y1: y.toFixed(1), y2: y.toFixed(1) });
       gridline.style.stroke = "var(--line)";
@@ -307,44 +312,66 @@
 
       var label = svgEl("text", { x: marginLeft - 8, y: (y + 3.5).toFixed(1), "text-anchor": "end", "font-size": "11" });
       label.style.fill = "var(--ink-muted)";
-      label.textContent = "¥" + Math.round(v).toLocaleString("ja-JP");
+      label.textContent = yFormat(v);
       svg.appendChild(label);
     });
 
-    // X軸: 5点の目盛ラベル
-    var xTickCount = Math.min(5, points.length);
+    // X軸: 5点の目盛ラベル(時刻ベースで等間隔に配置)
+    var xTickCount = 5;
     for (var i = 0; i < xTickCount; i++) {
-      var idx = Math.round((i / Math.max(1, xTickCount - 1)) * (points.length - 1));
-      var x = xAt(idx);
-      // 端のラベルは中央揃えだとviewBox外にはみ出るため、両端だけ内側寄せにする。
+      var t = minT + ((maxT - minT) * i) / (xTickCount - 1);
+      var x = xAt(t);
       var anchor = i === 0 ? "start" : i === xTickCount - 1 ? "end" : "middle";
       var xLabel = svgEl("text", { x: x.toFixed(1), y: H - 6, "text-anchor": anchor, "font-size": "11" });
       xLabel.style.fill = "var(--ink-muted)";
-      xLabel.textContent = xFmt(points[idx].t);
+      xLabel.textContent = xFmt(t);
       svg.appendChild(xLabel);
     }
 
-    // 折れ線 + 塗りつぶし
-    var linePoints = points.map(function (p, i) { return xAt(i).toFixed(1) + "," + yAt(p.close).toFixed(1); });
-    var areaPoints = linePoints.concat([
-      xAt(points.length - 1).toFixed(1) + "," + (marginTop + plotH),
-      xAt(0).toFixed(1) + "," + (marginTop + plotH),
-    ]).join(" ");
-    var area = svgEl("polygon", { points: areaPoints });
-    area.style.fill = up ? "rgba(255,90,90,0.14)" : "rgba(63,208,208,0.14)";
-    svg.appendChild(area);
-
-    var line = svgEl("polyline", {
-      points: linePoints.join(" "), fill: "none", "stroke-width": "2",
-      "stroke-linejoin": "round", "stroke-linecap": "round",
+    seriesList.forEach(function (s) {
+      var linePoints = s.points.map(function (p) { return xAt(p.t).toFixed(1) + "," + yAt(p.value).toFixed(1); });
+      if (s.fillArea && s.points.length > 0) {
+        var areaPoints = linePoints.concat([
+          xAt(s.points[s.points.length - 1].t).toFixed(1) + "," + (marginTop + plotH),
+          xAt(s.points[0].t).toFixed(1) + "," + (marginTop + plotH),
+        ]).join(" ");
+        var area = svgEl("polygon", { points: areaPoints });
+        area.style.fill = s.areaColor || s.color;
+        svg.appendChild(area);
+      }
+      var line = svgEl("polyline", {
+        points: linePoints.join(" "), fill: "none", "stroke-width": "2",
+        "stroke-linejoin": "round", "stroke-linecap": "round",
+      });
+      line.style.stroke = s.color;
+      svg.appendChild(line);
     });
-    line.style.stroke = up ? "var(--critical)" : "var(--cat-new_tech)";
-    svg.appendChild(line);
 
     return svg;
   }
 
-  function buildStockChart(stock) {
+  var PEER_DEFS = [
+    { key: "honda", label: "ホンダ", color: "#e2c24f" },
+    { key: "nissan", label: "日産自動車", color: "#b285f0" },
+    { key: "suzuki", label: "スズキ", color: "#35c98a" },
+    { key: "mazda", label: "マツダ", color: "#ff8a5a" },
+    { key: "subaru", label: "SUBARU", color: "#4fd0d0" },
+    { key: "mitsubishi", label: "三菱自動車", color: "#ff6b9d" },
+  ];
+  var TOYOTA_COMPARE_COLOR = "#3fa9f5";
+
+  function yenFormat(v) { return "¥" + Math.round(v).toLocaleString("ja-JP"); }
+  function pctFormat(v) { return (v >= 0 ? "+" : "") + v.toFixed(1) + "%"; }
+
+  function normalizeToPercent(points) {
+    if (!points.length) return [];
+    var base = points[0].close;
+    return points.map(function (p) {
+      return { t: p.t, value: base ? ((p.close - base) / base) * 100 : 0 };
+    });
+  }
+
+  function buildStockChart(stock, peerStocks) {
     var card = el("div", "stock-card");
     card.appendChild(el("div", "stock-card__title", "トヨタ自動車 株価 (7203.T)"));
 
@@ -368,13 +395,20 @@
     card.appendChild(priceRow);
 
     var periodTabs = el("div", "tab-group");
+    var peerRow = el("div", "tab-group stock-card__peer-row");
     var chartWrap = el("div");
     var rangeRow = el("div", "stock-card__range");
+    var legendRow = el("div", "stock-card__legend");
     card.appendChild(periodTabs);
+    card.appendChild(peerRow);
     card.appendChild(chartWrap);
     card.appendChild(rangeRow);
+    card.appendChild(legendRow);
 
-    var defaultIdx = 3; // 3ヶ月
+    var activePeers = {};
+    var currentPeriod = STOCK_PERIODS[3]; // 3ヶ月をデフォルトに
+
+    var defaultIdx = 3;
     var buttons = STOCK_PERIODS.map(function (period, idx) {
       var btn = el("button", "tab-group__btn" + (idx === defaultIdx ? " is-active" : ""), period.label);
       btn.addEventListener("click", function () {
@@ -385,19 +419,79 @@
       return btn;
     });
 
-    function renderPeriod(period) {
-      var source = (period.source === "intraday" ? stock.intraday : stock.daily) || [];
-      var points = period.filter(source.slice());
-      chartWrap.innerHTML = "";
-      chartWrap.appendChild(renderStockSVG(points, period.xFmt));
+    peerRow.appendChild(el("span", "tab-group__label", "比較:"));
+    PEER_DEFS.forEach(function (peer) {
+      var hasData = peerStocks && peerStocks[peer.key];
+      var btn = el("button", "tab-group__btn", peer.label);
+      if (!hasData) {
+        btn.disabled = true;
+        btn.style.opacity = "0.4";
+      } else {
+        btn.addEventListener("click", function () {
+          activePeers[peer.key] = !activePeers[peer.key];
+          btn.classList.toggle("is-active", activePeers[peer.key]);
+          renderPeriod(currentPeriod);
+        });
+      }
+      peerRow.appendChild(btn);
+    });
 
+    function renderPeriod(period) {
+      currentPeriod = period;
+      var toyotaSource = (period.source === "intraday" ? stock.intraday : stock.daily) || [];
+      var toyotaPoints = period.filter(toyotaSource.slice());
+      var activePeerKeys = PEER_DEFS.filter(function (p) { return activePeers[p.key]; }).map(function (p) { return p.key; });
+
+      chartWrap.innerHTML = "";
+      legendRow.innerHTML = "";
       rangeRow.innerHTML = "";
-      if (points.length > 0) {
-        var closes = points.map(function (p) { return p.close; });
-        var min = Math.min.apply(null, closes);
-        var max = Math.max.apply(null, closes);
-        rangeRow.appendChild(el("span", null, "安値 " + formatYen0(min)));
-        rangeRow.appendChild(el("span", null, "高値 " + formatYen0(max)));
+
+      if (activePeerKeys.length === 0) {
+        // 単体表示: トヨタの実株価(円)を、上昇/下落で色分けした従来通りの表示。
+        var tUp = toyotaPoints.length > 1 ? toyotaPoints[toyotaPoints.length - 1].close >= toyotaPoints[0].close : true;
+        var series = [{
+          points: toyotaPoints.map(function (p) { return { t: p.t, value: p.close }; }),
+          color: tUp ? "var(--critical)" : "var(--cat-new_tech)",
+          areaColor: tUp ? "rgba(255,90,90,0.14)" : "rgba(63,208,208,0.14)",
+          fillArea: true,
+        }];
+        chartWrap.appendChild(renderStockSVG(series, period.xFmt, yenFormat));
+
+        if (toyotaPoints.length > 0) {
+          var closes = toyotaPoints.map(function (p) { return p.close; });
+          rangeRow.appendChild(el("span", null, "安値 " + formatYen0(Math.min.apply(null, closes))));
+          rangeRow.appendChild(el("span", null, "高値 " + formatYen0(Math.max.apply(null, closes))));
+        }
+      } else {
+        // 比較表示: トヨタ+選択メーカーを、期間開始時点を0%とした騰落率で重ね描き。
+        var compareSeries = [{
+          label: "トヨタ自動車",
+          points: normalizeToPercent(toyotaPoints),
+          color: TOYOTA_COMPARE_COLOR,
+          fillArea: false,
+        }];
+        PEER_DEFS.forEach(function (peer) {
+          if (!activePeers[peer.key]) return;
+          var peerData = peerStocks[peer.key];
+          var peerSource = (period.source === "intraday" ? peerData.intraday : peerData.daily) || [];
+          var peerPoints = period.filter(peerSource.slice());
+          compareSeries.push({
+            label: peer.label,
+            points: normalizeToPercent(peerPoints),
+            color: peer.color,
+            fillArea: false,
+          });
+        });
+        chartWrap.appendChild(renderStockSVG(compareSeries, period.xFmt, pctFormat));
+
+        compareSeries.forEach(function (s) {
+          var tag = el("span", "stock-card__legend-item");
+          var swatch = el("span", "stock-card__legend-swatch");
+          swatch.style.background = s.color;
+          tag.appendChild(swatch);
+          tag.appendChild(document.createTextNode(s.label));
+          legendRow.appendChild(tag);
+        });
       }
     }
 
@@ -406,7 +500,8 @@
     card.appendChild(el(
       "p", "panel__note stock-card__note",
       "終値ベース。データ提供: Yahoo Finance(非公式・無認証エンドポイント)。「日」「週」は15分足、" +
-      "「月」以降は日足を表示しています。"
+      "「月」以降は日足を表示しています。「比較」で他メーカーを選ぶと、期間開始時点を0%とした" +
+      "騰落率での重ね描き表示に切り替わります。"
     ));
 
     return card;
@@ -485,6 +580,27 @@
     }
     card.appendChild(note);
 
+    return card;
+  }
+
+  // ---- ① トヨタ自動車: 決算に関する考察 ---------------------------------------
+
+  function buildEarningsCommentaryCard(earnings) {
+    if (!earnings || earnings.error || !earnings.commentary || earnings.commentary.length === 0) {
+      return null;
+    }
+    var card = el("div", "panel panel--full commentary-card");
+    card.appendChild(el("div", "earnings-card__title", "決算についての考察"));
+    var list = el("ul", "commentary-list");
+    earnings.commentary.forEach(function (line) {
+      list.appendChild(el("li", "commentary-list__item", line));
+    });
+    card.appendChild(list);
+    card.appendChild(el(
+      "p", "panel__note",
+      "取得した決算数値どうしを機械的に比較して自動生成した参考コメントであり、正式な経営分析・" +
+      "投資判断の根拠ではありません。"
+    ));
     return card;
   }
 
@@ -609,17 +725,19 @@
 
   // ---- ① トヨタ自動車 最新トピックス ---------------------------------------
 
-  function buildToyotaPanel(section, stockData, earningsData) {
+  function buildToyotaPanel(section, stockData, earningsData, peerStocksData) {
     var panel = el("section", "panel panel--full");
     panel.id = "section-toyota";
     panel.appendChild(buildPanelHeader("car", "① トヨタ自動車 最新トピックス", (section.newest || []).length));
 
     var topRow = el("div", "toyota-top-row");
-    topRow.appendChild(buildStockChart(stockData));
+    topRow.appendChild(buildStockChart(stockData, peerStocksData));
     topRow.appendChild(buildEarningsCard(earningsData));
     panel.appendChild(topRow);
 
     panel.appendChild(buildFullYearComparisonCard(earningsData));
+    var commentaryCard = buildEarningsCommentaryCard(earningsData);
+    if (commentaryCard) panel.appendChild(commentaryCard);
 
     panel.appendChild(el("p", "panel__note", "トヨタ自動車に関するニュースをGoogleニュース検索から日英で集約し、見出しのキーワードから新製品・新技術・規制・経営・政策・他へ自動分類しています(参考値)。"));
 
@@ -942,7 +1060,7 @@
 
   function render(data) {
     board.innerHTML = "";
-    board.appendChild(buildToyotaPanel(data.sections.toyota_news, data.sections.toyota_stock, data.sections.toyota_earnings));
+    board.appendChild(buildToyotaPanel(data.sections.toyota_news, data.sections.toyota_stock, data.sections.toyota_earnings, data.sections.peer_stocks));
     board.appendChild(buildIndustryPanel(data.sections.industry_news));
     board.appendChild(buildMotorsportsPanel(data.sections.motorsports));
     if (data.sections.regulations) {

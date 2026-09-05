@@ -19,12 +19,18 @@ import requests
 from .common import REQUEST_TIMEOUT, USER_AGENT
 
 SYMBOL = "7203.T"
-URL = f"https://query1.finance.yahoo.com/v8/finance/chart/{SYMBOL}"
+CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+URL = CHART_URL.format(symbol=SYMBOL)
 
 
-def _fetch_series(range_: str, interval: str) -> list[dict]:
+def fetch_series(symbol: str, range_: str, interval: str) -> list[dict]:
+    """指定した銘柄コードの株価チャートデータ(日時+終値の配列)を取得する。
+
+    トヨタ以外の日本の自動車メーカー(peer_stocks.py)とも共有するための
+    汎用関数。
+    """
     resp = requests.get(
-        URL,
+        CHART_URL.format(symbol=symbol),
         params={"range": range_, "interval": interval},
         headers={"User-Agent": USER_AGENT},
         timeout=REQUEST_TIMEOUT,
@@ -64,7 +70,7 @@ def fetch() -> dict:
 
         intraday: list[dict] = []
         try:
-            intraday = _fetch_series("5d", "15m")
+            intraday = fetch_series(SYMBOL, "5d", "15m")
         except Exception:  # noqa: BLE001
             intraday = []
 

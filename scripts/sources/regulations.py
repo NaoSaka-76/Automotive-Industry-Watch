@@ -12,7 +12,6 @@
 from __future__ import annotations
 
 from .common import dedupe_by_url, fetch_google_news_rss, sort_by_recency, sort_by_relevance
-from .translate import attach_translations
 
 CATEGORY_ORDER = ["emissions", "safety", "noise", "cybersecurity"]
 CATEGORY_LABELS = {
@@ -131,7 +130,6 @@ def _fetch_group(queries: list[tuple], limit_per_query: int = 10) -> dict:
     deduped = dedupe_by_url(raw)
     newest = sort_by_recency(deduped)
     popular = sort_by_relevance(deduped)
-    attach_translations(newest)
     return {"newest": newest, "popular": popular}
 
 

@@ -389,6 +389,27 @@ a { color: inherit; }
 .stock-card__note, .earnings-card__note { margin-top: 12px; }
 .earnings-card__note a { color: var(--accent-ink); text-decoration: underline; }
 
+.stock-card__peer-row { margin-top: 6px; }
+.stock-card__peer-row .tab-group__btn:disabled { cursor: default; }
+
+.stock-card__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: var(--ink-muted);
+}
+
+.stock-card__legend-item { display: inline-flex; align-items: center; gap: 5px; }
+
+.stock-card__legend-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
 .earnings-card__period { font-size: 13px; color: var(--ink-muted); margin-bottom: 10px; }
 
 .earnings-card__grid {
@@ -511,6 +532,38 @@ a { color: inherit; }
   text-transform: uppercase;
   letter-spacing: 0.03em;
   margin-bottom: 4px;
+}
+
+/* ---- toyota: earnings commentary ---- */
+
+.commentary-card { margin: 14px 0 6px; padding: 16px; }
+
+.commentary-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.commentary-list__item {
+  position: relative;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--ink);
+}
+
+.commentary-list__item::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
 }
 
 /* ---- item list ---- */

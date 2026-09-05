@@ -172,6 +172,88 @@ def _extract_pdf_data(pdf_bytes: bytes) -> dict:
     return result
 
 
+def _pct_delta(latest: float | None, base: float | None) -> float | None:
+    if latest is None or base is None or base == 0:
+        return None
+    return (latest - base) / abs(base) * 100
+
+
+def _generate_commentary(quarterly: dict | None, full_year: dict | None) -> list[str]:
+    """決算数値から機械的に導ける考察コメントを生成する(簡易な参考情報)。
+
+    LLMや外部の分析サービスは使わず、取得済みの数値どうしを比較する
+    ルールベースの短文生成に留めている。経営分析としての正式なコメントでは
+    ないため、UI側にもその旨を明記すること。
+    """
+    lines: list[str] = []
+    if not quarterly:
+        return lines
+
+    rev_yoy = quarterly.get("revenue_yoy")
+    op_yoy = quarterly.get("operating_income_yoy")
+    pretax_yoy = quarterly.get("income_before_tax_yoy")
+    net_yoy = quarterly.get("net_income_yoy")
+
+    if rev_yoy is not None and op_yoy is not None:
+        rev_word = "増収" if rev_yoy >= 0 else "減収"
+        op_word = "増益" if op_yoy >= 0 else "減益"
+        lines.append(
+            f"直近四半期({quarterly.get('period_label', '')})は、営業収益が前年同期比{rev_yoy:+.1f}%の{rev_word}、"
+            f"営業利益は同{op_yoy:+.1f}%の{op_word}となった。"
+        )
+
+    if op_yoy is not None and pretax_yoy is not None and net_yoy is not None:
+        gap = pretax_yoy - op_yoy
+        if abs(gap) >= 15:
+            if pretax_yoy > op_yoy:
+                lines.append(
+                    f"営業利益(前年同期比{op_yoy:+.1f}%)に対し税引前利益は同{pretax_yoy:+.1f}%、"
+                    f"親会社帰属利益は同{net_yoy:+.1f}%と大きく上振れており、為替差益や持分法投資損益など"
+                    "営業外要因の寄与が大きいとみられる。"
+                )
+            else:
+                lines.append(
+                    f"営業利益(前年同期比{op_yoy:+.1f}%)に対し税引前利益は同{pretax_yoy:+.1f}%と下振れており、"
+                    "為替差損や営業外費用の増加が本業の増益効果を相殺した可能性がある。"
+                )
+
+    latest_fc = (full_year or {}).get("latest_forecast")
+    initial_fc = (full_year or {}).get("initial_forecast")
+    if latest_fc and initial_fc:
+        rev_delta = _pct_delta(latest_fc.get("revenue"), initial_fc.get("revenue"))
+        op_delta = _pct_delta(latest_fc.get("operating_income"), initial_fc.get("operating_income"))
+        net_delta = _pct_delta(latest_fc.get("net_income"), initial_fc.get("net_income"))
+        if op_delta is not None:
+            direction = "上方修正" if op_delta >= 0 else "下方修正"
+            extra = []
+            if rev_delta is not None:
+                extra.append(f"売上高は{rev_delta:+.1f}%")
+            if net_delta is not None:
+                extra.append(f"純利益は{net_delta:+.1f}%")
+            extra_text = f"({'、'.join(extra)}の修正)" if extra else ""
+            lines.append(
+                f"通期の営業利益見通しは期初予想から{direction}され、{op_delta:+.1f}%の変化となっている{extra_text}。"
+            )
+
+    if latest_fc:
+        op_actual = quarterly.get("operating_income")
+        op_forecast = latest_fc.get("operating_income")
+        if op_actual and op_forecast:
+            pace = op_actual / op_forecast * 100
+            if pace >= 27:
+                pace_word = "順調な"
+            elif pace >= 20:
+                pace_word = "概ね計画通りの"
+            else:
+                pace_word = "やや遅れ気味の"
+            lines.append(
+                f"直近四半期の営業利益は通期見通しの約{pace:.0f}%に相当し、単純に4等分した目安(25%)と比べると"
+                f"{pace_word}進捗である(四半期ごとの季節性の影響を受けるため参考値)。"
+            )
+
+    return lines
+
+
 def fetch() -> dict:
     try:
         resp = requests.get(PAGE_URL, headers={"User-Agent": USER_AGENT}, timeout=REQUEST_TIMEOUT)
@@ -221,6 +303,7 @@ def fetch() -> dict:
         return {
             "quarterly": quarterly,
             "full_year": full_year,
+            "commentary": _generate_commentary(quarterly, full_year),
             "unit": "百万円",
             "source_url": PAGE_URL,
             "source_label": "トヨタ自動車 投資家情報(公式)",
