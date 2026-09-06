@@ -75,8 +75,27 @@ def _translate_all_sections(sections: dict) -> None:
     translate_batch(all_candidates)
 
 
+def _is_error_item(value: object) -> bool:
+    return (
+        isinstance(value, dict)
+        and (
+            value.get("source") == "error"
+            or str(value.get("title", "")).startswith("[取得エラー]")
+        )
+    )
+
+
+def _scrub_error_items(node: object) -> object:
+    """一時的な取得失敗で紛れ込んだエラー項目を最終JSONから除去する(UI保険)。"""
+    if isinstance(node, dict):
+        return {k: _scrub_error_items(v) for k, v in node.items()}
+    if isinstance(node, list):
+        return [_scrub_error_items(v) for v in node if not _is_error_item(v)]
+    return node
+
+
 def main() -> None:
-    dashboard = build_dashboard()
+    dashboard = _scrub_error_items(build_dashboard())
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT_PATH.write_text(json.dumps(dashboard, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"Wrote dashboard data to {OUTPUT_PATH}")
