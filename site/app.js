@@ -141,6 +141,244 @@
     return (items || []).filter(function (item) { return item.category === category; });
   }
 
+  // ---- セクション別 注目トピックス・ダイジェスト ---------------------------
+  // 見出しの出現キーワードを、新しさ(24時間以内を重視)と記事本数で重み付けし、
+  // 各セクション冒頭に「いま気にすべき話題」を自動抽出して表示する。
+
+  var DIGEST_STOP = {
+    // 英語(汎用)
+    the: 1, a: 1, an: 1, and: 1, or: 1, of: 1, to: 1, in: 1, on: 1, for: 1, with: 1,
+    at: 1, by: 1, from: 1, is: 1, are: 1, was: 1, were: 1, be: 1, as: 1, it: 1, its: 1,
+    this: 1, that: 1, these: 1, those: 1, has: 1, have: 1, had: 1, will: 1, not: 1,
+    you: 1, your: 1, we: 1, they: 1, but: 1, more: 1, all: 1, one: 1, out: 1, how: 1,
+    why: 1, what: 1, who: 1, new: 1, car: 1, cars: 1, says: 1, say: 1, said: 1,
+    review: 1, first: 1, drive: 1, news: 1, report: 1, could: 1, would: 1, than: 1,
+    "2024": 1, "2025": 1, "2026": 1, "2027": 1, "gp": 1,
+    // 日本語(汎用)
+    "新型": 1, "新車": 1, "発表": 1, "モデル": 1, "自動車": 1, "価格": 1, "登場": 1,
+    "搭載": 1, "採用": 1, "公開": 1, "予想": 1, "スクープ": 1, "最新": 1, "情報": 1,
+    "全長": 1, "サイズ": 1, "ボディ": 1, "エンジン": 1, "デザイン": 1, "性能": 1,
+    "画像": 1, "動画": 1, "記事": 1, "一部": 1, "設定": 1, "馬力": 1, "走行": 1,
+    "受注": 1, "復活": 1, "米国": 1, "日本": 1, "発売": 1, "現行": 1, "次期": 1,
+    "可能性": 1, "方法": 1, "理由": 1, "今回": 1, "詳細": 1, "写真": 1, "比較": 1,
+    "解説": 1, "登録": 1, "実現": 1, "検討": 1, "世界": 1, "業界": 1, "対応": 1,
+    "開催": 1, "確認": 1, "予定": 1, "報道": 1, "話題": 1, "注目": 1, "販売": 1,
+    // メディア名・媒体語・URL断片(見出し末尾に頻出)
+    "ニュース": 1, "メーカー": 1, "モーター": 1, "ランキング": 1, "レポート": 1,
+    "スマートニュース": 1, "オートックワン": 1, "レスポンス": 1, "ウォッチ": 1,
+    com: 1, net: 1, org: 1, www: 1, jp: 1, co: 1, web: 1, online: 1, media: 1,
+    magazine: 1, motor: 1, motors: 1, auto: 1, autos: 1, autosport: 1, sport: 1,
+    sports: 1, racing: 1, racer: 1, times: 1, post: 1, daily: 1, press: 1,
+    reuters: 1, bloomberg: 1, autoblog: 1, autocar: 1, carscoops: 1, jalopnik: 1,
+    insideevs: 1, electrek: 1, motor1: 1, autoexpress: 1, autonews: 1, cnbc: 1,
+    yahoo: 1, google: 1, msn: 1, forbes: 1, guardian: 1, express: 1, mail: 1,
+    "true": 1, about: 1, after: 1, into: 1, over: 1, our: 1, their: 1, his: 1,
+    her: 1, been: 1, being: 1, just: 1, now: 1, get: 1, gets: 1, got: 1, may: 1,
+    can: 1, cant: 1, dont: 1, vs: 1, via: 1, best: 1, top: 1, big: 1, off: 1,
+  };
+
+  function cleanTitle(text) {
+    if (!text) return "";
+    var out = String(text);
+    // 見出し末尾の「 - 媒体名」を除去
+    var dash = out.lastIndexOf(" - ");
+    if (dash > 12) out = out.slice(0, dash);
+    // 「 | 」区切りは先頭ブロックのみ採用(global.toyota等の定型末尾を除去)
+    var bar = out.indexOf(" | ");
+    if (bar > 6) out = out.slice(0, bar);
+    // スペースが崩れた末尾媒体名(例: 「…- cnbc.com」「…-ロイター通信」)を除去
+    out = out.replace(/\s*[-–—]\s*[A-Za-z0-9.]+\.(com|net|org|jp|co\.jp|co\.uk)\s*$/i, "");
+    out = out.replace(/\s*[-–—]\s*[^-–—]{1,18}(通信|新聞|ニュース|ドットコム|オンライン)\s*$/, "");
+    out = out.replace(/\s*[-–—]\s+[A-Z][A-Za-z]{1,7}\s*$/, "");
+    return out.trim();
+  }
+
+  function digestTokens(text) {
+    if (!text) return [];
+    var clean = cleanTitle(text);
+    var tokens = [];
+    (clean.match(/[゠-ヿ]{3,}/g) || []).forEach(function (k) {
+      tokens.push(k.replace(/[・]/g, ""));
+    });
+    (clean.match(/[一-鿿]{2,8}/g) || []).forEach(function (k) {
+      if (k.length <= 8) tokens.push(k);
+    });
+    (clean.toLowerCase().match(/[a-z][a-z']{3,13}/g) || []).forEach(function (w) { tokens.push(w); });
+    return tokens;
+  }
+
+  function itemAgeHours(raw) {
+    if (!raw) return null;
+    var t = Date.parse(raw);
+    if (isNaN(t)) return null;
+    return (Date.now() - t) / 3600000;
+  }
+
+  function shortStamp(t) {
+    return new Date(t).toLocaleString("ja-JP", {
+      month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit",
+    });
+  }
+
+  function scoreItem(item, popRank, popLen) {
+    var s = 0;
+    var age = itemAgeHours(item.published);
+    if (age == null) s += 0.3;
+    else if (age <= 6) s += 3;
+    else if (age <= 24) s += 2;
+    else if (age <= 72) s += 1;
+    else if (age <= 168) s += 0.4;
+    else s += 0.15;
+    if (popRank != null && popLen) {
+      s += Math.max(0, (popLen - popRank) / popLen) * 1.5;
+    }
+    return s;
+  }
+
+  function gatherSectionItems(groups) {
+    var byKey = {};
+    var list = [];
+    groups.forEach(function (g) {
+      var pop = g.popular || [];
+      var popIndex = {};
+      pop.forEach(function (it, i) {
+        var pk = it.url || it.title;
+        if (pk && popIndex[pk] == null) popIndex[pk] = i;
+      });
+      (g.newest || []).concat(pop).forEach(function (it) {
+        var key = (it.url || it.title || "") + "|" + (g.tag || "");
+        if (!it.url && !it.title) return;
+        if (byKey[key]) return;
+        var clone = {
+          title: it.title, title_ja: it.title_ja, url: it.url,
+          source: it.source, published: it.published,
+          _tag: g.tag || "", _id: list.length,
+          _score: scoreItem(it, popIndex[it.url || it.title], pop.length),
+        };
+        byKey[key] = clone;
+        list.push(clone);
+      });
+    });
+    return list;
+  }
+
+  function buildClusters(items, cfg) {
+    cfg = cfg || {};
+    var stop = {};
+    Object.keys(DIGEST_STOP).forEach(function (k) { stop[k] = 1; });
+    Object.keys(cfg.stop || {}).forEach(function (k) { stop[k] = 1; });
+
+    var tokenMap = {};
+    items.forEach(function (it) {
+      var text = it.title_ja || it.title || "";
+      var seen = {};
+      digestTokens(text).forEach(function (tok) {
+        if (tok.length < 2) return;
+        if (stop[tok] || stop[tok.toLowerCase()]) return;
+        if (seen[tok]) return;
+        seen[tok] = true;
+        if (!tokenMap[tok]) tokenMap[tok] = { token: tok, members: [], score: 0 };
+        tokenMap[tok].members.push(it);
+        tokenMap[tok].score += it._score;
+      });
+    });
+
+    var clusters = Object.keys(tokenMap)
+      .map(function (k) { return tokenMap[k]; })
+      .filter(function (c) { return c.members.length >= 2; });
+    clusters.sort(function (a, b) { return b.score - a.score; });
+
+    var used = {};
+    var out = [];
+    clusters.forEach(function (c) {
+      var overlap = 0;
+      c.members.forEach(function (m) { if (used[m._id]) overlap++; });
+      if (c.members.length && overlap / c.members.length >= 0.6) return;
+      c.members.forEach(function (m) { used[m._id] = true; });
+      out.push(c);
+    });
+    return out;
+  }
+
+  function buildSectionDigest(groups, cfg) {
+    cfg = cfg || {};
+    var items = gatherSectionItems(groups);
+    if (items.length === 0) return null;
+
+    var within24 = items.filter(function (it) {
+      var a = itemAgeHours(it.published);
+      return a != null && a <= 24;
+    });
+    var pool = within24;
+    if (pool.length < 3) {
+      pool = items.filter(function (it) {
+        var a = itemAgeHours(it.published);
+        return a != null && a <= 72;
+      });
+    }
+    if (pool.length < 3) pool = items.slice();
+
+    var clusters = buildClusters(pool, cfg).slice(0, 3);
+
+    var freshest = null;
+    items.forEach(function (it) {
+      var t = it.published ? Date.parse(it.published) : NaN;
+      if (!isNaN(t) && (freshest == null || t > freshest)) freshest = t;
+    });
+
+    var wrap = el("div", "section-digest");
+    var head = el("div", "section-digest__head");
+    head.appendChild(el("span", "section-digest__badge", "ダイジェスト"));
+    var lead = "直近24時間で " + within24.length + " 件更新";
+    if (freshest != null) lead += " ・ 最新 " + shortStamp(freshest);
+    head.appendChild(el("span", "section-digest__lead", lead));
+    wrap.appendChild(head);
+
+    if (clusters.length === 0) {
+      var top = pool.slice().sort(function (a, b) { return b._score - a._score; })[0];
+      if (top) {
+        wrap.appendChild(el(
+          "p", "section-digest__solo",
+          "話題の集中は見られません。注目は「" + (top.title_ja || top.title) + "」。"
+        ));
+      }
+      return wrap;
+    }
+
+    var ul = el("ul", "section-digest__topics");
+    clusters.forEach(function (c) {
+      var members = c.members.slice().sort(function (a, b) {
+        return (b.published ? Date.parse(b.published) : 0) - (a.published ? Date.parse(a.published) : 0);
+      });
+      var rep = members.slice().sort(function (a, b) { return b._score - a._score; })
+        .filter(function (m) {
+          var len = cleanTitle(m.title_ja || m.title || "").length;
+          return len >= 12 && len <= 110;
+        })[0] || members[0];
+      var times = members
+        .map(function (m) { return m.published ? Date.parse(m.published) : NaN; })
+        .filter(function (t) { return !isNaN(t); });
+      var newestT = times.length ? Math.max.apply(null, times) : null;
+
+      var li = el("li", "section-digest__topic-item");
+      var line = el("div", "section-digest__topic-line");
+      line.appendChild(el("span", "section-digest__topic", "「" + c.token + "」"));
+      var meta = members.length + " 件";
+      if (newestT != null) meta += " ・ 最新 " + shortStamp(newestT);
+      if (rep._tag) meta = rep._tag + " ・ " + meta;
+      line.appendChild(el("span", "section-digest__topic-meta", meta));
+      li.appendChild(line);
+      li.appendChild(el("p", "section-digest__topic-sample", cleanTitle(rep.title_ja || rep.title)));
+      ul.appendChild(li);
+    });
+    wrap.appendChild(ul);
+    wrap.appendChild(el(
+      "p", "section-digest__foot",
+      "見出しの出現キーワードを、新しさ(24時間以内を重視)と記事本数で重み付けして自動抽出した注目トピックスです(参考値)。"
+    ));
+    return wrap;
+  }
+
   // ---- 上部ダイジェスト(直近24時間ハイライト) ------------------------------
 
   function buildDigestPanel(data) {
@@ -741,6 +979,12 @@
 
     panel.appendChild(el("p", "panel__note", "トヨタ自動車に関するニュースをGoogleニュース検索から日英で集約し、見出しのキーワードから新製品・新技術・規制・経営・政策・他へ自動分類しています(参考値)。"));
 
+    var toyotaDigest = buildSectionDigest(
+      [{ tag: "", newest: section.newest, popular: section.popular }],
+      { stop: { "トヨタ": 1, toyota: 1, toyotas: 1, lexus: 1, "レクサス": 1 } }
+    );
+    if (toyotaDigest) panel.appendChild(toyotaDigest);
+
     var listWrap = el("div", "list-scroll");
     var activeCategory = "all";
     var activeSort = "newest";
@@ -781,6 +1025,14 @@
     }, 0);
     panel.appendChild(buildPanelHeader("globe", "② 自動車産業に関するトピックス", totalCount));
     panel.appendChild(el("p", "panel__note", "地域別に自動車産業ニュースを集約し、見出しのキーワードから新製品・新技術・規制・経営・政策・他へ自動分類しています(参考値)。"));
+
+    var industryDigest = buildSectionDigest(
+      REGION_ORDER.filter(function (k) { return regions[k]; }).map(function (k) {
+        return { tag: regions[k].label, newest: regions[k].newest, popular: regions[k].popular };
+      }),
+      {}
+    );
+    if (industryDigest) panel.appendChild(industryDigest);
 
     var regionLabels = REGION_ORDER.filter(function (k) { return regions[k]; }).map(function (k) {
       return (regions[k].flag || "") + " " + regions[k].label;
@@ -893,6 +1145,19 @@
     panel.appendChild(buildPanelHeader("flag", "③ モータースポーツ", totalCount));
     panel.appendChild(el("p", "panel__note", "F1・WEC・WRC・NASCAR/IndyCar・Super GT/スーパーフォーミュラ・Formula E・クロスカントリーラリー・ドリフト・全日本ラリー選手権の話題をカテゴリー別に集約しています。"));
 
+    var motorsportsDigest = buildSectionDigest(
+      keys.map(function (k) {
+        return { tag: categories[k].label, newest: categories[k].newest, popular: categories[k].popular };
+      }),
+      { stop: {
+        "予選": 1, "決勝": 1, "結果": 1, "速報": 1, "順位": 1, "初日": 1, "開幕": 1,
+        "選手権": 1, "今季": 1, "参戦": 1, "出場": 1, "第戦": 1, "戦速報": 1,
+        wec: 1, nascar: 1, indycar: 1, wrc: 1, imsa: 1, fia: 1, gp: 1, fp: 1,
+        "ラリー": 1, "レース": 1, "ドライバー": 1, "マシン": 1, "チーム": 1,
+      } }
+    );
+    if (motorsportsDigest) panel.appendChild(motorsportsDigest);
+
     var labels = ["すべて"].concat(keys.map(function (k) { return categories[k].label; }));
     var catKeys = ["all"].concat(keys);
 
@@ -993,6 +1258,23 @@
       "関する報道全般、「当局の最新トピックス」は所管当局(国土交通省・NHTSA・欧州委員会/UNECE・MIIT等)の" +
       "名称を含む報道を中心に集約したものです(キーワード検索による自動集計のため参考値)。"
     ));
+
+    var regGroups = [];
+    regionKeys.forEach(function (rk) {
+      REGULATION_CATEGORY_ORDER.forEach(function (ck) {
+        var c = regions[rk].categories[ck];
+        if (!c) return;
+        regGroups.push({
+          tag: regions[rk].label + "・" + REGULATION_CATEGORY_LABEL[ck],
+          newest: (c.summary.newest || []).concat(c.authority.newest || []),
+          popular: (c.summary.popular || []).concat(c.authority.popular || []),
+        });
+      });
+    });
+    var regulationsDigest = buildSectionDigest(regGroups, {
+      stop: { "規制": 1, "改正": 1, "強化": 1, "対策": 1, "基準": 1, "制度": 1, "見直": 1 },
+    });
+    if (regulationsDigest) panel.appendChild(regulationsDigest);
 
     var GLOBAL_REGION = "__global__";
     var allRegionKeys = [GLOBAL_REGION].concat(regionKeys);
