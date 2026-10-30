@@ -49,3 +49,15 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+  # 公開リポジトリは60日間コミットがないとscheduleが自動停止されるため、
+  # 毎回ワークフローを再有効化して停止までの期限をリセットする。
+  keepalive:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Keep scheduled workflow enabled
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/update-dashboard.yml/enable"
